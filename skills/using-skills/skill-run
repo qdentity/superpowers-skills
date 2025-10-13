@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Generic runner for skill scripts
+# Searches project skills first (walks up to git root), then global skills
 #
 # Usage: scripts/skill-run <skill-relative-path> [args...]
 # Example: scripts/skill-run skills/collaboration/remembering-conversations/tool/search-conversations "query"
@@ -10,14 +11,15 @@ if [[ $# -eq 0 ]]; then
     cat <<'EOF'
 Usage: scripts/skill-run <skill-relative-path> [args...]
 
-Runs scripts from skills directory.
+Runs scripts from skills, checking project first (walks up to git root), then global.
 
 Examples:
   scripts/skill-run skills/collaboration/remembering-conversations/tool/search-conversations "query"
   scripts/skill-run skills/collaboration/remembering-conversations/tool/index-conversations --cleanup
 
 The script will be found at:
-  ${SUPERPOWERS_SKILLS_ROOT}/<skill-relative-path>
+  1. .claude/<skill-relative-path> (walks up from current dir to git root)
+  2. ${SUPERPOWERS_SKILLS_ROOT}/<skill-relative-path> (global skills)
 EOF
     exit 1
 fi
@@ -30,7 +32,39 @@ shift  # Remove script path from args, leaving remaining args
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
 
-# Try to run the script
+# Project skills (walk up from current dir to git root looking for .claude/skills)
+if git rev-parse --show-toplevel >/dev/null 2>&1; then
+    GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+    CURRENT_DIR=$(pwd)
+
+    # Strip "skills/" prefix from SCRIPT_PATH for project lookup
+    # (user passes "skills/foo/bar", project should have ".claude/foo/bar")
+    PROJECT_SCRIPT_PATH="${SCRIPT_PATH#skills/}"
+
+    # Walk up from current directory to git root
+    CHECK_DIR="$CURRENT_DIR"
+    while true; do
+        PROJECT_SCRIPT="$CHECK_DIR/.claude/${PROJECT_SCRIPT_PATH}"
+        if [[ -x "$PROJECT_SCRIPT" ]]; then
+            exec "$PROJECT_SCRIPT" "$@"
+        fi
+
+        # Stop if we've reached git root
+        if [[ "$CHECK_DIR" == "$GIT_ROOT" ]]; then
+            break
+        fi
+
+        # Move up one directory
+        CHECK_DIR=$(dirname "$CHECK_DIR")
+
+        # Safety check: don't go above git root
+        if [[ ! "$CHECK_DIR" == "$GIT_ROOT"* ]]; then
+            break
+        fi
+    done
+fi
+
+# Try global skills
 SCRIPT="${SKILLS_ROOT}/${SCRIPT_PATH}"
 if [[ -x "$SCRIPT" ]]; then
     exec "$SCRIPT" "$@"
@@ -40,5 +74,21 @@ fi
 echo "Error: Script not found: $SCRIPT_PATH" >&2
 echo "" >&2
 echo "Searched:" >&2
-echo "  $SCRIPT" >&2
+if git rev-parse --show-toplevel >/dev/null 2>&1; then
+    GIT_ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+    CURRENT_DIR=$(pwd)
+    CHECK_DIR="$CURRENT_DIR"
+    PROJECT_SCRIPT_PATH="${SCRIPT_PATH#skills/}"
+    while true; do
+        echo "  $CHECK_DIR/.claude/${PROJECT_SCRIPT_PATH} (project)" >&2
+        if [[ "$CHECK_DIR" == "$GIT_ROOT" ]]; then
+            break
+        fi
+        CHECK_DIR=$(dirname "$CHECK_DIR")
+        if [[ ! "$CHECK_DIR" == "$GIT_ROOT"* ]]; then
+            break
+        fi
+    done
+fi
+echo "  $SCRIPT (global)" >&2
 exit 1

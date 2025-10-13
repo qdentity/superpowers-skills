@@ -1,8 +1,8 @@
 ---
 name: Getting Started with Skills
-description: Skills wiki intro - mandatory workflows, search tool, brainstorming triggers
+description: Skills wiki intro - mandatory workflows, search tool, brainstorming triggers, project skills
 when_to_use: when starting any conversation
-version: 4.0.2
+version: 4.1.0
 ---
 
 # Getting Started with Skills
@@ -89,6 +89,32 @@ Your human partner's specific instructions describe WHAT to do, not HOW.
 
 **Why:** Specific instructions mean clear requirements, which is when workflows matter MOST. Skipping process on "simple" tasks is how simple tasks become complex problems.
 
+## Project-Specific Skills
+
+Skills can be defined at two levels:
+
+1. **Project skills** - `.claude/skills/` anywhere between your current directory and git root (team-shared, version controlled)
+2. **Global skills** - `~/.config/superpowers/skills/` (your working branch)
+
+**Project skills shadow global skills.** If `.claude/skills/testing/my-test/SKILL.md` exists, it overrides the global skill at that path.
+
+**Monorepo support:** The system walks up from your current directory to the git root looking for `.claude/skills/`. This means:
+- In a monorepo, you can have project-specific skills at any level
+- Working in `/monorepo/project-a/` finds `/monorepo/project-a/.claude/skills/` first
+- If not found, checks `/monorepo/.claude/skills/` at the root
+- Uses the closest `.claude/skills/` to your current directory
+
+**When to use project skills:**
+- Document team-specific workflows
+- Capture project architecture patterns
+- Share domain knowledge with team members
+- Onboard new developers with project context
+- Define subproject-specific practices in monorepos
+
+**To create a project skill:**
+1. Create `.claude/skills/` in your project (or subproject) directory
+2. Add skills following the standard structure (see skills/meta/writing-skills/SKILL.md)
+3. Commit to version control - team gets the skills automatically
 ## Summary
 
 **Starting any task:**
