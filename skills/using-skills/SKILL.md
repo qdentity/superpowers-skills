@@ -1,8 +1,8 @@
 ---
 name: Getting Started with Skills
-description: Skills wiki intro - mandatory workflows, search tool, brainstorming triggers
+description: Skills wiki intro - mandatory workflows, search tool, context-aware project skills
 when_to_use: when starting any conversation
-version: 4.0.2
+version: 4.1.0
 ---
 
 # Getting Started with Skills

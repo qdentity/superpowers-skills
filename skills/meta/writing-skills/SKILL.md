@@ -47,16 +47,22 @@ The entire skill creation process follows RED-GREEN-REFACTOR.
 
 ## When to Create a Skill
 
-**Create when:**
+**Create global skill when:**
 - Technique wasn't intuitively obvious to you
 - You'd reference this again across projects
 - Pattern applies broadly (not project-specific)
-- Others would benefit
+- Others would benefit from it
 
-**Don't create for:**
+**Create project skill (`.claude/skills/`) when:**
+- Team-specific workflows and conventions
+- Project architecture patterns
+- Domain-specific best practices
+- Onboarding patterns for this codebase
+
+**Don't create skill for:**
 - One-off solutions
 - Standard practices well-documented elsewhere
-- Project-specific conventions (put in CLAUDE.md)
+- Simple reminders (use CLAUDE.md instead)
 
 ## Skill Types
 
@@ -71,16 +77,33 @@ API docs, syntax guides, tool documentation (office docs)
 
 ## Directory Structure
 
-**All skills are in the skills repository at `${SUPERPOWERS_SKILLS_ROOT}`:**
+**Global skills** (in your branch at `${SUPERPOWERS_SKILLS_ROOT}`):
 
 ```
-${SUPERPOWERS_SKILLS_ROOT}
-  skill-name/
-    SKILL.md              # Main reference (required)
-    supporting-file.*     # Only if needed
+${SUPERPOWERS_SKILLS_ROOT}/
+  skills/
+    category/
+      skill-name/
+        SKILL.md              # Main reference (required)
+        supporting-file.*     # Only if needed
 ```
 
-**Flat namespace** - all skills in one searchable location
+**Project skills** (version-controlled with project):
+
+```
+.claude/
+  skills/
+    category/
+      skill-name/
+        SKILL.md              # Same structure as global
+        tool/                 # Executable scripts if needed
+```
+
+**Key differences:**
+- Global skills: Broadly applicable, personal working branch
+- Project skills: Team-shared, version-controlled
+- Current dir project skills shadow global skills when paths match
+- Additional context project skills (from additionalDirectories) shown with location tags
 
 **Separate files for:**
 1. **Heavy reference** (100+ lines) - API docs, comprehensive syntax
