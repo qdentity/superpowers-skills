@@ -28,7 +28,7 @@ Example focus areas:
 
 Run:
 ```bash
-~/.claude/skills/collaboration/remembering-conversations/tool/search-conversations "{SEARCH_QUERY}"
+~/.config/superpowers/skills/skills/collaboration/remembering-conversations/tool/search-conversations "{SEARCH_QUERY}"
 ```
 
 This returns:
