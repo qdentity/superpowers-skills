@@ -1,12 +1,113 @@
 #!/usr/bin/env bash
 # find-skills - Find and list skills with when_to_use guidance
 # Shows all skills by default, filters by pattern if provided
+# Searches current dir + additionalDirectories from settings, then global skills
 
 set -euo pipefail
 
 # Determine directories
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILLS_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+# Function to get additional directories from Claude Code settings
+# Outputs: "path|settings_dir" for each additionalDirectory found
+get_additional_dirs() {
+    local git_root
+    git_root=$(git rev-parse --show-toplevel 2>/dev/null) || return
+
+    local current_dir
+    current_dir=$(pwd)
+
+    # Walk up from current dir to git root, checking for settings files
+    local check_dir="$current_dir"
+    while true; do
+        local settings_files=(
+            "$check_dir/.claude/settings.json"
+            "$check_dir/.claude/settings.local.json"
+        )
+
+        for settings_file in "${settings_files[@]}"; do
+            if [[ -f "$settings_file" ]]; then
+                # Extract paths from additionalDirectories array only
+                # Output format: "path|settings_dir" so we can resolve relative paths correctly
+                awk -v settings_dir="$check_dir" '
+                    /"additionalDirectories"/ { in_section=1; next }
+                    in_section && /\]/ { in_section=0; next }
+                    in_section && /^[[:space:]]*"/ {
+                        gsub(/^[[:space:]]*"|"[[:space:]]*,?[[:space:]]*$/, "")
+                        print $0 "|" settings_dir
+                    }
+                ' "$settings_file" 2>/dev/null
+            fi
+        done
+
+        # Stop if we've reached git root
+        if [[ "$(cd "$check_dir" && pwd)" == "$(cd "$git_root" && pwd)" ]]; then
+            break
+        fi
+
+        # Move up one directory
+        check_dir=$(dirname "$check_dir")
+
+        # Safety check
+        if [[ "$check_dir" == "/" ]]; then
+            break
+        fi
+    done
+}
+
+# Collect additional directories from settings (excluding current dir)
+CURRENT_DIR=$(pwd)
+ADDITIONAL_DIRS=()
+
+if git rev-parse --show-toplevel >/dev/null 2>&1; then
+    while IFS='|' read -r dir settings_dir; do
+        [[ -z "$dir" ]] && continue
+
+        # Resolve relative paths from settings_dir, absolute paths as-is
+        if [[ "$dir" = /* ]]; then
+            # Absolute path - use as is
+            dir_normalized=$(cd "$dir" 2>/dev/null && pwd) || continue
+        else
+            # Relative path - resolve from where settings file is
+            dir_normalized=$(cd "$settings_dir" && cd "$dir" 2>/dev/null && pwd) || continue
+        fi
+
+        current_normalized=$(cd "$CURRENT_DIR" 2>/dev/null && pwd)
+
+        # Skip if it's the current directory
+        if [[ "$dir_normalized" == "$current_normalized" ]]; then
+            continue
+        fi
+
+        # Deduplicate: only add if not already in array
+        already_added=false
+        for existing_dir in "${ADDITIONAL_DIRS[@]}"; do
+            if [[ "$existing_dir" == "$dir_normalized" ]]; then
+                already_added=true
+                break
+            fi
+        done
+
+        if ! $already_added; then
+            ADDITIONAL_DIRS+=("$dir_normalized")
+        fi
+    done < <(get_additional_dirs)
+fi
+
+# Project skills: current dir .claude/skills
+PROJECT_SKILLS_DIR=""
+if [[ -d "$CURRENT_DIR/.claude/skills" ]]; then
+    PROJECT_SKILLS_DIR="$CURRENT_DIR/.claude/skills"
+fi
+
+# Additional context skills: .claude/skills in each additionalDirectory
+ADDITIONAL_SKILLS_DIRS=()
+for dir in "${ADDITIONAL_DIRS[@]}"; do
+    if [[ -d "$dir/.claude/skills" ]]; then
+        ADDITIONAL_SKILLS_DIRS+=("$dir/.claude/skills")
+    fi
+done
 
 SUPERPOWERS_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/superpowers"
 LOG_FILE="${SUPERPOWERS_DIR}/search-log.jsonl"
@@ -28,11 +129,15 @@ EXAMPLES:
 
 OUTPUT:
   Each line shows: Use skill-path/SKILL.md when [trigger]
+  Skills from additionalDirectories show location: Use skill-path (dirname) when [trigger]
   Paths include /SKILL.md for direct use with Read tool
+  Current dir project skills shadow additional directory skills when paths match
 
 SEARCH:
   Searches both skill content AND path names.
-  Skills location: ~/.config/superpowers/skills/
+  Current dir: .claude/skills/ in current working directory
+  Additional context: .claude/skills/ in each additionalDirectories from .claude/settings*.json
+  Global skills: ~/.config/superpowers/skills/
 EOF
     exit 0
 fi
@@ -54,7 +159,8 @@ get_skill_path() {
     echo "$rel_path"
 }
 
-# Collect all matching skills
+# Collect all matching skills (track seen skills to handle shadowing)
+seen_skills_list=""
 results=()
 
 # If pattern provided, log the search
@@ -63,23 +169,86 @@ if [[ -n "$PATTERN" ]]; then
     echo "{\"timestamp\":\"$timestamp\",\"query\":\"$PATTERN\"}" >> "$LOG_FILE" 2>/dev/null || true
 fi
 
-# Search skills directory
+# Search current directory project skills (no location tag)
+if [[ -n "$PROJECT_SKILLS_DIR" ]]; then
+    while IFS= read -r file; do
+        [[ -z "$file" ]] && continue
+
+        # Get path relative to .claude/skills/, then prepend "skills/" for consistency
+        rel_path="${file#$PROJECT_SKILLS_DIR/}"
+        skill_path="skills/${rel_path}"
+
+        when_to_use=$(get_when_to_use "$file")
+        seen_skills_list="${seen_skills_list}${skill_path}"$'\n'
+        results+=("$skill_path||$when_to_use")  # Empty location tag
+    done < <(
+        if [[ -n "$PATTERN" ]]; then
+            # Pattern mode: search content and paths
+            {
+                grep -E -r "$PATTERN" "$PROJECT_SKILLS_DIR/" --include="SKILL.md" -l 2>/dev/null || true
+                find "$PROJECT_SKILLS_DIR/" -name "SKILL.md" -type f 2>/dev/null | grep -E "$PATTERN" 2>/dev/null || true
+            } | sort -u
+        else
+            # Show all
+            find "$PROJECT_SKILLS_DIR/" -name "SKILL.md" -type f 2>/dev/null || true
+        fi
+    )
+fi
+
+# Search additional context directories (with location tags)
+for ADDITIONAL_SKILLS_DIR in "${ADDITIONAL_SKILLS_DIRS[@]}"; do
+    # Get project directory name for location tag (parent of .claude/skills)
+    # /path/to/project/.claude/skills -> /path/to/project
+    project_dir=$(dirname "$(dirname "$ADDITIONAL_SKILLS_DIR")")
+    location_tag=$(basename "$project_dir")
+
+    while IFS= read -r file; do
+        [[ -z "$file" ]] && continue
+
+        rel_path="${file#$ADDITIONAL_SKILLS_DIR/}"
+        skill_path="skills/${rel_path}"
+
+        # Skip if already seen (shadowed by current dir)
+        if echo "$seen_skills_list" | grep -q "^${skill_path}$"; then
+            continue
+        fi
+
+        when_to_use=$(get_when_to_use "$file")
+        seen_skills_list="${seen_skills_list}${skill_path}"$'\n'
+        results+=("$skill_path|$location_tag|$when_to_use")
+    done < <(
+        if [[ -n "$PATTERN" ]]; then
+            {
+                grep -E -r "$PATTERN" "$ADDITIONAL_SKILLS_DIR/" --include="SKILL.md" -l 2>/dev/null || true
+                find "$ADDITIONAL_SKILLS_DIR/" -name "SKILL.md" -type f 2>/dev/null | grep -E "$PATTERN" 2>/dev/null || true
+            } | sort -u
+        else
+            find "$ADDITIONAL_SKILLS_DIR/" -name "SKILL.md" -type f 2>/dev/null || true
+        fi
+    )
+done
+
+# Search global skills directory (skip if shadowed by project skills)
 while IFS= read -r file; do
     [[ -z "$file" ]] && continue
 
     skill_path=$(get_skill_path "$file" "$SKILLS_DIR")
+
+    # Skip if shadowed by project skill
+    echo "$seen_skills_list" | grep -q "^${skill_path}$" && continue
+
     when_to_use=$(get_when_to_use "$file")
-    results+=("$skill_path|$when_to_use")
+    results+=("$skill_path||$when_to_use")  # Empty location tag
 done < <(
     if [[ -n "$PATTERN" ]]; then
-        # Pattern mode: search content and paths
+        # Pattern mode: search content and paths (exclude .claude directories)
         {
-            grep -E -r -- "$PATTERN" "$SKILLS_DIR/" --include="SKILL.md" -l 2>/dev/null || true
-            find "$SKILLS_DIR/" -name "SKILL.md" -type f 2>/dev/null | grep -E -- "$PATTERN" 2>/dev/null || true
+            grep -E -r -- "$PATTERN" "$SKILLS_DIR/" --include="SKILL.md" --exclude-dir=".claude" -l 2>/dev/null || true
+            find "$SKILLS_DIR/" -name "SKILL.md" -type f -not -path "*/.claude/*" 2>/dev/null | grep -E -- "$PATTERN" 2>/dev/null || true
         } | sort -u
     else
-        # Show all
-        find "$SKILLS_DIR/" -name "SKILL.md" -type f 2>/dev/null || true
+        # Show all (exclude .claude directories)
+        find "$SKILLS_DIR/" -name "SKILL.md" -type f -not -path "*/.claude/*" 2>/dev/null || true
     fi
 )
 
@@ -96,11 +265,21 @@ if [[ ${#results[@]} -eq 0 ]]; then
 fi
 
 # Sort and display results
-printf "%s\n" "${results[@]}" | sort | while IFS='|' read -r skill_path when_to_use; do
-    if [[ -n "$when_to_use" ]]; then
-        echo "Use $skill_path $when_to_use"
+printf "%s\n" "${results[@]}" | sort | while IFS='|' read -r skill_path location_tag when_to_use; do
+    if [[ -n "$location_tag" ]]; then
+        # Additional directory skill - show with location tag
+        if [[ -n "$when_to_use" ]]; then
+            echo "Use $skill_path ($location_tag) $when_to_use"
+        else
+            echo "$skill_path ($location_tag)"
+        fi
     else
-        echo "$skill_path"
+        # Current dir or global skill - no location tag
+        if [[ -n "$when_to_use" ]]; then
+            echo "Use $skill_path $when_to_use"
+        else
+            echo "$skill_path"
+        fi
     fi
 done
 
