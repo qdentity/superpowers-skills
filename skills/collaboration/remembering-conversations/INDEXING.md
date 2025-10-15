@@ -6,17 +6,17 @@ Index, archive, and maintain conversations for search.
 
 **Install auto-indexing hook:**
 ```bash
-~/.claude/skills/collaboration/remembering-conversations/tool/install-hook
+~/.config/superpowers/skills/skills/collaboration/remembering-conversations/tool/install-hook
 ```
 
 **Index all conversations:**
 ```bash
-~/.claude/skills/collaboration/remembering-conversations/tool/index-conversations
+~/.config/superpowers/skills/skills/collaboration/remembering-conversations/tool/index-conversations
 ```
 
 **Process unindexed only:**
 ```bash
-~/.claude/skills/collaboration/remembering-conversations/tool/index-conversations --cleanup
+~/.config/superpowers/skills/skills/collaboration/remembering-conversations/tool/index-conversations --cleanup
 ```
 
 ## Features
@@ -32,7 +32,7 @@ Index, archive, and maintain conversations for search.
 ### 1. Install Hook (One-Time)
 
 ```bash
-cd ~/.claude/skills/collaboration/remembering-conversations/tool
+cd ~/.config/superpowers/skills/skills/collaboration/remembering-conversations/tool
 ./install-hook
 ```
 
